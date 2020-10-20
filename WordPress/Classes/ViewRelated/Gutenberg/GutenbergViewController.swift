@@ -347,6 +347,8 @@ class GutenbergViewController: UIViewController, PostEditor {
         }, failure: { (error) in
             print("---> ERROR syncking JETPACK")
         })
+
+        XpostSuggestionService.suggestions(for: post.blog, completion: nil)
     }
 
     override func viewWillAppear(_ animated: Bool) {
@@ -854,6 +856,12 @@ extension GutenbergViewController: GutenbergBridgeDelegate {
         })
     }
 
+    func gutenbergDidRequestXpost(callback: @escaping (Swift.Result<String, NSError>) -> Void) {
+        DispatchQueue.main.async(execute: { [weak self] in
+            self?.showSuggestions(type: .xpost, callback: callback)
+        })
+    }
+
     func gutenbergDidRequestStarterPageTemplatesTooltipShown() -> Bool {
         return gutenbergSettings.starterPageTemplatesTooltipShown
     }
@@ -883,6 +891,8 @@ extension GutenbergViewController {
         switch type {
         case .mention:
             guard SuggestionService.shared.shouldShowSuggestions(for: blog) else { return }
+        case .xpost:
+            break
         }
 
         previousFirstResponder = view.findFirstResponder()
@@ -957,6 +967,7 @@ extension GutenbergViewController: GutenbergBridgeDataSource {
     func gutenbergCapabilities() -> [Capabilities: Bool] {
         return [
             .mentions: post.blog.isAccessibleThroughWPCom() && FeatureFlag.gutenbergMentions.enabled,
+            .xposts: XpostSuggestionService.retrieveSortedPersistedResults(for: post.blog)?.isEmpty == false,
             .unsupportedBlockEditor: isUnsupportedBlockEditorEnabled,
             .canEnableUnsupportedBlockEditor: post.blog.jetpack?.isConnected ?? false,
             .modalLayoutPicker: FeatureFlag.gutenbergModalLayoutPicker.enabled,

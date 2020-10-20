@@ -4,6 +4,7 @@ extension SuggestionType {
     var trigger: String {
         switch self {
         case .mention: return "@"
+        case .xpost: return "+"
         }
     }
 }
@@ -17,10 +18,26 @@ extension SuggestionType {
 
     var suggestionTrigger: String { return suggestionType.trigger }
 
+    func siteSuggestions(for siteID: NSNumber, completion: @escaping ([SiteSuggestion]?) -> Void) {
+        let context = ContextManager.shared.mainContext
+        guard let blog = BlogService(managedObjectContext: context).blog(byBlogId: siteID) else { return }
+
+        XpostSuggestionService.suggestions(for: blog) { result in
+            switch result {
+            case .success(let siteSuggestions):
+                completion(siteSuggestions)
+            case .failure:
+                completion(nil)
+            }
+        }
+    }
+
     func predicate(for searchQuery: String) -> NSPredicate {
         switch suggestionType {
         case .mention:
             return NSPredicate(format: "(displayName contains[c] %@) OR (username contains[c] %@)", searchQuery, searchQuery)
+        case .xpost:
+            return NSPredicate(format: "(title contains[c] %@) OR (siteURL.absoluteString contains[c] %@)", searchQuery, searchQuery)
         }
     }
 
@@ -29,7 +46,10 @@ extension SuggestionType {
         switch (suggestionType, suggestion) {
         case (.mention, let suggestion as UserSuggestion):
             title = suggestion.username
-        default: title = nil
+        case (.xpost, let suggestion as SiteSuggestion):
+            title = suggestion.subdomain
+        default:
+            return nil
         }
         return title.map { suggestionType.trigger.appending($0) }
     }
@@ -38,22 +58,29 @@ extension SuggestionType {
         switch (suggestionType, suggestion) {
         case (.mention, let suggestion as UserSuggestion):
             return suggestion.displayName
-        default: return nil
+        case (.xpost, let suggestion as SiteSuggestion):
+            return suggestion.title
+        default:
+            return nil
         }
     }
 
     private func imageURLForSuggestion(at indexPath: IndexPath) -> URL? {
         let suggestion = searchResults[indexPath.row]
-
         switch (suggestionType, suggestion) {
         case (.mention, let suggestion as UserSuggestion):
             return suggestion.imageURL
-        default: return nil
+        case (.xpost, let suggestion as SiteSuggestion):
+            return suggestion.blavatarURL
+        default:
+            return nil
         }
     }
 
     func loadImage(for suggestion: AnyObject, in cell: SuggestionsTableViewCell, at indexPath: IndexPath) {
+
         cell.iconImageView.image = UIImage(named: "gravatar")
+
         guard let imageURL = imageURLForSuggestion(at: indexPath) else { return }
         cell.imageDownloadHash = imageURL.hashValue
 
@@ -65,27 +92,34 @@ extension SuggestionType {
         }
     }
 
+    private func suggestionText(for suggestion: Any) -> String? {
+        switch (suggestionType, suggestion) {
+        case (.mention, let suggestion as UserSuggestion):
+            return suggestion.username
+        case (.xpost, let suggestion as SiteSuggestion):
+            return suggestion.title
+        default: return nil
+        }
+    }
+
     func fetchSuggestions(for siteID: NSNumber) {
-        switch self.suggestionType {
+        switch suggestionType {
         case .mention:
             suggestions(for: siteID) { userSuggestions in
                 self.suggestions = userSuggestions
                 self.showSuggestions(forWord: self.searchText)
             }
-        }
-    }
-
-    private func suggestionText(for suggestion: Any) -> String? {
-        switch (suggestionType, suggestion) {
-        case (.mention, let suggestion as UserSuggestion):
-            return suggestion.username
-        default: return nil
+        case .xpost:
+            siteSuggestions(for: siteID) { siteSuggestions in
+                self.suggestions = siteSuggestions
+                self.showSuggestions(forWord: self.searchText)
+            }
+        default: return;
         }
     }
 
     private func retrieveIcon(for imageURL: URL?, success: @escaping (UIImage?) -> Void) {
         let imageSize = CGSize(width: SuggestionsTableViewCellIconSize, height: SuggestionsTableViewCellIconSize)
-
         if let image = cachedIcon(for: imageURL, with: imageSize) {
             success(image)
         } else {
